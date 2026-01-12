@@ -1,0 +1,14 @@
+ID,Proyecto,Descripcion,Acciones tomadas,Dependencias,Status,Notas,Asignado,Responsable,Progreso,Inicio,Fin,Dias_retraso
+1,EBS Colombia,Rehabilitación de monitoreo de EBS Colombia,"Se acuerda sesión en conjunto con kyndryl y equipo aplicativo para establecer procedimiento ante incidentes y no afectar el agente.
+Se lleva sesión de entendimiento de pendientes.",Sesión de entendimiento y VoBo,En dependencia,Pendiente sesión con Paola Orellana y kyndryl,Alejandro Aguirre / Victor Flores,Alejandro Aguirre / Victor Flores,20,2025-08-01,2025-10-30,74
+2,EBS México,Rehabilitación de monitoreo de EBS México,"Se acuerda sesión en conjunto con capgemini para establecer procedimiento ante incidentes y no afectar el agente.
+Se lleva sesión de entendimiento de pendientes.",Sesión de entendimiento y VoBo,En dependencia,Pendiente a sesión de seguimiento,Hardi Romero,Alejandro Aguirre / Victor Flores,20,2025-08-01,2025-10-30,74
+3,Estandarización eventos,Homologación de alertamientos críticos,"Se llevan sesiones diarias para entendimiento de todos los involucrados.
+Se construye paquete de alertas y se analizan comportamientos.",Sesiones de seguimiento,En Proceso,Se ha observado una disminucion del ruido de hasta 90% confirmado. Sobre las alertas de incicidencia (INC.),José Velazquez,Laura Palestina,80,2025-09-29,2025-12-30,13
+4,Actualización agentes,Actualización de agentes de máquina y APM,"Gestión de olas de trabajo, CHOs y VoBos para agentes de máquina",Acceso a servidores faltantes,En dependencia,Se ha observado una disminucion del ruido de hasta 90% confirmado. Sobre las alertas de incicidencia (INC.),Hardi Romero,Alejandro Aguirre,75,2025-10-01,2025-12-30,13
+5,Habilitación DRP PQR,Sistema DRP para PQR SPIN,"Se requiere valida correcto acceso a tabla de base de datos de QRO.
+Se valida que no habrá nueva infraestructura por monitorear.
+SE ajustan cambios en tablero, étricas y alertas",En seguimiento,En dependencia,"En seguimiento de ACR por altos tiempos de respuesta relacionadas a xCloud y SBO.
+Se han realizado busquedas de métricas de sbo, construido tableros y analizado dependencias...",Antonio Rosas,Alejandro Aguirre,70,2025-10-27,2025-12-31,12
+6,POC control M,Homologación de alertamientos infra,Se presenta el plan. Se espera iniciar con servidores de control M.,Sesiones de entendimiento,En dependencia,Se requiere sesión de continuidad,Hardi Romero,Laura Palestina,10,2025-11-01,2026-01-30,-18
+7,Migración flujo esquemas,Migración de flujos BD,,,finalizado,Se requirió la segmentacion del monitoreo de la base de datos de fintech monterrey...,Antonio Rosas,Victor Medina,100,2025-12-01,2025-12-25,10

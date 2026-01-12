@@ -1,0 +1,238 @@
+from shiny import ui, module, render
+from plotnine import *
+import pandas as pd
+from datetime import date
+
+# Importación explícita segura
+from plotnine import ggplot, aes, geom_col, geom_bar, geom_text, theme_minimal, labs, coord_flip, theme, element_text, element_blank, expand_limits, scale_fill_manual, geom_vline, annotate, geom_segment, scale_x_datetime, geom_point, geom_hline
+
+@module.ui
+def dashboard_ui():
+    return ui.div(
+        # --- 1. INYECCIÓN CSS (Estilos de Fuerza Bruta) ---
+        ui.tags.style(
+            """
+            /* Reset de Gaps para compactación */
+            .kpi-wrapper .bslib-grid, 
+            .kpi-wrapper .bslib-mb-spacing,
+            .kpi-wrapper .html-fill-item {
+                gap: 0px !important;
+                margin-bottom: 0px !important;
+                padding-bottom: 0px !important;
+            }
+            
+            /* Gantt Card sin padding */
+            .gantt-card .card-body {
+                padding-top: 0px !important;
+                padding-bottom: 0px !important;
+            }
+            """
+        ),
+        
+        ui.layout_column_wrap(
+            # --- SECCIÓN A: KPIs (Fila Superior) ---
+            ui.div(
+                ui.layout_column_wrap(
+                    ui.value_box(
+                        "Días Retraso Promedio",
+                        ui.output_text("kpi_retraso"),
+                        theme="warning"
+                    ),
+                    ui.value_box(
+                        "Progreso General",
+                        ui.output_text("kpi_progreso"),
+                        theme="bg-gradient-blue-purple"
+                    ),
+                    ui.value_box(
+                        "Proyectos Visibles",
+                        ui.output_text("kpi_total"),
+                        theme="primary"
+                    ),
+                    width=1/3, 
+                    fill=False
+                ),
+                class_="kpi-wrapper"
+            ),
+            
+            # --- SECCIÓN B: ANALÍTICA AVANZADA (Fila Central) ---
+            ui.layout_column_wrap(
+                # Widget 1: Matriz de Salud (Scatter)
+                ui.card(
+                    ui.card_header("Matriz de Salud (Progreso vs Retraso)", class_="p-1"),
+                    ui.output_plot("plot_matriz")
+                ),
+                # Widget 2: Duración (Barras)
+                ui.card(
+                    ui.card_header("Duración Estimada (Días)", class_="p-1"),
+                    ui.output_plot("plot_duracion")
+                ),
+                # Widget 3: Carga (Barras)
+                ui.card(
+                    ui.card_header("Carga por Responsable", class_="p-1"),
+                    ui.output_plot("plot_responsables")
+                ),
+                width=1/3,
+                fill=False
+            ),
+
+            # --- SECCIÓN C: GANTT CHART (Fila Inferior - Base Visual) ---
+            ui.card(
+                ui.output_plot("plot_gantt"),
+                full_screen=True,
+                class_="gantt-card shadow-none border-0 mt-0",
+                # Pull-up suave ya que ahora está abajo
+                style="margin-top: -10px; z-index: 10;" 
+            ),
+            
+            width=1,
+            fill=False
+        )
+    )
+
+@module.server
+def dashboard_server(input, output, session, df_reactive):
+    
+    # --- KPIs ---
+    @render.text
+    def kpi_retraso():
+        df = df_reactive()
+        if df.empty: return "0"
+        return f"{df['Dias_retraso'].mean():.1f} d"
+
+    @render.text
+    def kpi_progreso():
+        df = df_reactive()
+        if df.empty: return "0%"
+        return f"{df['Progreso'].mean():.1f}%"
+
+    @render.text
+    def kpi_total():
+        df = df_reactive()
+        return f"{len(df)}"
+
+    # --- WIDGET 1: MATRIZ DE SALUD (Scatter Plot) ---
+    @render.plot
+    def plot_matriz():
+        df = df_reactive()
+        if df.empty: return _empty_message("-")
+
+        colores = {
+            'finalizado': '#2ecc71', 'En Proceso': '#3498db', 
+            'En dependencia': '#f1c40f', 'Riesgo': '#e74c3c'
+        }
+
+        p = (
+            ggplot(df, aes(x='Progreso', y='Dias_retraso', color='Status'))
+            + geom_point(size=5, alpha=0.8)
+            
+            # Cuadrantes de referencia
+            + geom_hline(yintercept=0, linetype="dashed", color="gray", alpha=0.5)
+            + geom_vline(xintercept=50, linetype="dashed", color="gray", alpha=0.5)
+            
+            + scale_color_manual(values=colores)
+            + labs(x="Progreso (%)", y="Días Retraso")
+            + theme_minimal()
+            + theme(
+                legend_position="none",
+                figure_size=(5, 3),
+                plot_margin=0
+            )
+        )
+        return p
+
+    # --- WIDGET 2: DURACIÓN ESTIMADA (Barras Calculadas) ---
+    @render.plot
+    def plot_duracion():
+        df = df_reactive()
+        if df.empty: return _empty_message("-")
+
+        plot_df = df.copy()
+        # Cálculo de días (Fin - Inicio)
+        plot_df['Duracion'] = (plot_df['Fin'] - plot_df['Inicio']).dt.days
+        
+        # Validar si hay duraciones negativas o nulas y limpiar
+        plot_df['Duracion'] = plot_df['Duracion'].fillna(0)
+
+        p = (
+            ggplot(plot_df, aes(x='reorder(Proyecto, Duracion)', y='Duracion'))
+            + geom_col(fill='#34495e', width=0.7)
+            + coord_flip()
+            + geom_text(aes(label='Duracion'), nudge_y=1, size=8, color="#2c3e50")
+            + labs(x="", y="")
+            + theme_minimal()
+            + theme(
+                panel_grid=element_blank(),
+                axis_text_x=element_blank(),
+                axis_text_y=element_text(size=8),
+                figure_size=(5, 3),
+                plot_margin=0
+            )
+        )
+        return p
+
+    # --- WIDGET 3: CARGA POR RESPONSABLE ---
+    @render.plot
+    def plot_responsables():
+        df = df_reactive()
+        if df.empty: return _empty_message("-")
+
+        p = (
+            ggplot(df, aes(x='Responsable'))
+            + geom_bar(fill='#34495e', width=0.6)
+            + labs(x="", y="")
+            + theme_minimal()
+            + theme(
+                panel_grid_major_x=element_blank(),
+                axis_text_x=element_text(angle=45, ha='right', size=8),
+                figure_size=(5, 3),
+                plot_margin=0
+            )
+        )
+        return p
+
+    # --- GANTT CHART (Al fondo) ---
+    @render.plot
+    def plot_gantt():
+        df = df_reactive()
+        if df.empty: return _empty_message("Sin datos")
+
+        plot_df = df.copy()
+        today = pd.to_datetime(date.today())
+        today_str = today.strftime("%d-%b")
+
+        orden = plot_df.sort_values('Inicio', ascending=False)['Proyecto'].unique()
+        plot_df['Proyecto'] = pd.Categorical(plot_df['Proyecto'], categories=orden, ordered=True)
+        max_y = len(orden)
+
+        colores = {
+            'finalizado': '#2ecc71', 'En Proceso': '#3498db', 
+            'En dependencia': '#f1c40f', 'Riesgo': '#e74c3c'
+        }
+        
+        p = (
+            ggplot(plot_df, aes(x='Inicio', xend='Fin', y='Proyecto', yend='Proyecto', color='Status'))
+            + geom_segment(size=8, alpha=0.9)
+            
+            # Marcador de Fecha
+            + geom_vline(xintercept=today, linetype="dashed", color="#7f8c8d", size=1)
+            + annotate("text", x=today, y=max_y + 0.2, label=f"Hoy: {today_str}", 
+                       color="#7f8c8d", size=9, angle=0, ha="center", va="bottom")
+            + expand_limits(y=max_y + 0.5)
+            
+            + scale_color_manual(values=colores)
+            + labs(x="", y="", color="", title="")
+            + scale_x_datetime(date_labels="%d-%b")
+            + theme_minimal()
+            + theme(
+                panel_grid_major_y=element_blank(),
+                axis_text_y=element_text(size=9, color="#2c3e50", weight="bold"),
+                axis_text_x=element_text(size=8),
+                legend_position="top",
+                figure_size=(12, 3),
+                plot_margin=0
+            )
+        )
+        return p
+
+def _empty_message(msg):
+    return (ggplot() + annotate("text", x=0, y=0, label=msg, color="gray", size=10) + theme_void())

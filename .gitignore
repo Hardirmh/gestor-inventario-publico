@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Entornos virtuales
+venv/
+env/
+.env
+
+# Base de datos (IMPORTANTE: Esto evita subir tus datos reales)
+*.db
+*.sqlite3
+
+# Archivos de sistema y logs
+.DS_Store
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.zip

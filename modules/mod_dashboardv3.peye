@@ -1,0 +1,283 @@
+from shiny import ui, module, render
+from plotnine import *
+import pandas as pd
+import numpy as np
+from datetime import date, timedelta
+
+# Importación explícita segura
+from plotnine import ggplot, aes, geom_col, geom_bar, geom_text, theme_minimal, labs, coord_flip, theme, element_text, element_blank, expand_limits, scale_fill_manual, geom_vline, annotate, geom_segment, scale_x_datetime, geom_point, scale_color_manual, position_dodge
+
+@module.ui
+def dashboard_ui():
+    return ui.div(
+        # --- 1. INYECCIÓN CSS (Fuerza Bruta para Compactación) ---
+        ui.tags.style(
+            """
+            /* Reset de Gaps para compactación */
+            .kpi-wrapper .bslib-grid, 
+            .kpi-wrapper .bslib-mb-spacing,
+            .kpi-wrapper .html-fill-item {
+                gap: 0px !important;
+                margin-bottom: 0px !important;
+                padding-bottom: 0px !important;
+            }
+            
+            /* Gantt Card sin padding */
+            .gantt-card .card-body {
+                padding-top: 0px !important;
+                padding-bottom: 0px !important;
+            }
+            """
+        ),
+        
+        ui.layout_column_wrap(
+            # --- SECCIÓN A: KPIs (Fila Superior - Intacta) ---
+            ui.div(
+                ui.layout_column_wrap(
+                    ui.value_box(
+                        "Días Retraso Promedio",
+                        ui.output_text("kpi_retraso"),
+                        theme="warning"
+                    ),
+                    ui.value_box(
+                        "Progreso General",
+                        ui.output_text("kpi_progreso"),
+                        theme="bg-gradient-blue-purple"
+                    ),
+                    ui.value_box(
+                        "Proyectos Visibles",
+                        ui.output_text("kpi_total"),
+                        theme="primary"
+                    ),
+                    width=1/3, 
+                    fill=False
+                ),
+                class_="kpi-wrapper"
+            ),
+            
+            # --- SECCIÓN B: ANALÍTICA DE EFICIENCIA (NUEVA) ---
+            ui.layout_column_wrap(
+                # Widget 1: Eficiencia
+                ui.card(
+                    ui.card_header("Gap de Eficiencia (Tiempo vs Avance)", class_="p-1"),
+                    ui.output_plot("plot_efficiency")
+                ),
+                # Widget 2: Urgencia
+                ui.card(
+                    ui.card_header("Radar de Urgencia (Días para Go-Live)", class_="p-1"),
+                    ui.output_plot("plot_urgency")
+                ),
+                # Widget 3: Bloqueos
+                ui.card(
+                    ui.card_header("Concentración de Bloqueos", class_="p-1"),
+                    ui.output_plot("plot_blockers")
+                ),
+                width=1/3,
+                fill=False
+            ),
+
+            # --- SECCIÓN C: GANTT CHART (Fila Inferior - Intacta) ---
+            ui.card(
+                ui.output_plot("plot_gantt"),
+                full_screen=True,
+                class_="gantt-card shadow-none border-0 mt-0",
+                style="margin-top: -10px; z-index: 10;" 
+            ),
+            
+            width=1,
+            fill=False
+        )
+    )
+
+@module.server
+def dashboard_server(input, output, session, df_reactive):
+    
+    # --- KPIs ---
+    @render.text
+    def kpi_retraso():
+        df = df_reactive()
+        if df.empty: return "0"
+        return f"{df['Dias_retraso'].mean():.1f} d"
+
+    @render.text
+    def kpi_progreso():
+        df = df_reactive()
+        if df.empty: return "0%"
+        return f"{df['Progreso'].mean():.1f}%"
+
+    @render.text
+    def kpi_total():
+        df = df_reactive()
+        return f"{len(df)}"
+
+    # --- WIDGET 1: GAP DE EFICIENCIA (Barras Agrupadas) ---
+    @render.plot
+    def plot_efficiency():
+        df = df_reactive()
+        if df.empty: return _empty_message("-")
+
+        # Preparación de datos
+        calc_df = df.copy()
+        today = pd.to_datetime(date.today())
+
+        # Cálculos de tiempo
+        calc_df['Dias_Totales'] = (calc_df['Fin'] - calc_df['Inicio']).dt.days
+        calc_df['Dias_Gastados'] = (today - calc_df['Inicio']).dt.days
+        
+        # Evitar división por cero y valores negativos
+        calc_df['Dias_Totales'] = calc_df['Dias_Totales'].replace(0, 1) 
+        
+        # Porcentaje de tiempo consumido (tope 100%)
+        calc_df['Tiempo (%)'] = (calc_df['Dias_Gastados'] / calc_df['Dias_Totales'] * 100).clip(0, 100)
+        
+        # Transformar a formato largo para plotnine (Melt)
+        # Queremos comparar 'Progreso' vs 'Tiempo (%)'
+        plot_df = calc_df[['Proyecto', 'Progreso', 'Tiempo (%)']].melt(
+            id_vars='Proyecto', 
+            var_name='Metrica', 
+            value_name='Porcentaje'
+        )
+
+        colores = {
+            'Progreso': '#3498db',  # Azul (Avance Real)
+            'Tiempo (%)': '#95a5a6' # Gris (Tiempo Quemado)
+        }
+
+        p = (
+            ggplot(plot_df, aes(x='Proyecto', y='Porcentaje', fill='Metrica'))
+            + geom_col(position=position_dodge(width=0.8), width=0.7)
+            + coord_flip()
+            + scale_fill_manual(values=colores)
+            + labs(x="", y="% Comparativo", fill="")
+            + theme_minimal()
+            + theme(
+                legend_position="top",
+                panel_grid_major_y=element_blank(),
+                figure_size=(5, 3),
+                plot_margin=0,
+                axis_text_y=element_text(size=8),
+                axis_text_x=element_text(size=7)
+            )
+        )
+        return p
+
+    # --- WIDGET 2: RADAR DE URGENCIA (Lollipop Chart) ---
+    @render.plot
+    def plot_urgency():
+        df = df_reactive()
+        if df.empty: return _empty_message("-")
+
+        today = pd.to_datetime(date.today())
+        
+        # 1. Filtros: Solo proyectos activos (Progreso < 100)
+        plot_df = df[df['Progreso'] < 100].copy()
+        
+        if plot_df.empty: return _empty_message("Sin pendientes")
+
+        # 2. Calcular días restantes
+        plot_df['Dias_Restantes'] = (plot_df['Fin'] - today).dt.days
+        
+        # 3. Categorizar Urgencia para colores
+        conditions = [
+            (plot_df['Dias_Restantes'] < 15),
+            (plot_df['Dias_Restantes'] >= 15) & (plot_df['Dias_Restantes'] < 30),
+            (plot_df['Dias_Restantes'] >= 30)
+        ]
+        choices = ['Crítico (<15d)', 'Alerta (<30d)', 'Normal']
+        plot_df['Nivel'] = np.select(conditions, choices, default='Normal')
+
+        colores = {
+            'Crítico (<15d)': '#e74c3c', # Rojo
+            'Alerta (<30d)': '#f1c40f',  # Amarillo
+            'Normal': '#2ecc71'          # Verde
+        }
+
+        p = (
+            ggplot(plot_df, aes(x='reorder(Proyecto, -Dias_Restantes)', y='Dias_Restantes', color='Nivel'))
+            + geom_segment(aes(xend='Proyecto', yend=0), size=1.5) # El palo del lollipop
+            + geom_point(size=5) # El caramelo
+            + coord_flip()
+            + scale_color_manual(values=colores)
+            + labs(x="", y="Días para Fin", color="")
+            + theme_minimal()
+            + theme(
+                legend_position="none",
+                panel_grid_major_y=element_blank(),
+                figure_size=(5, 3),
+                plot_margin=0
+            )
+        )
+        return p
+
+    # --- WIDGET 3: CONCENTRACIÓN DE BLOQUEOS (Barras) ---
+    @render.plot
+    def plot_blockers():
+        df = df_reactive()
+        if df.empty: return _empty_message("-")
+
+        # Filtrar solo problemas
+        blockers = df[df['Status'].isin(['En dependencia', 'Riesgo'])].copy()
+
+        if blockers.empty:
+            return _empty_message("Sin Bloqueos Activos ✅")
+
+        p = (
+            ggplot(blockers, aes(x='Responsable'))
+            + geom_bar(fill='#e74c3c', width=0.6) # Rojo alerta
+            + labs(x="", y="Proyectos Bloqueados")
+            + theme_minimal()
+            + theme(
+                panel_grid_major_x=element_blank(),
+                axis_text_x=element_text(angle=45, ha='right', size=8),
+                figure_size=(5, 3),
+                plot_margin=0
+            )
+        )
+        return p
+
+    # --- SECCIÓN C: GANTT CHART (Intacto) ---
+    @render.plot
+    def plot_gantt():
+        df = df_reactive()
+        if df.empty: return _empty_message("Sin datos")
+
+        plot_df = df.copy()
+        today = pd.to_datetime(date.today())
+        today_str = today.strftime("%d-%b")
+
+        orden = plot_df.sort_values('Inicio', ascending=False)['Proyecto'].unique()
+        plot_df['Proyecto'] = pd.Categorical(plot_df['Proyecto'], categories=orden, ordered=True)
+        max_y = len(orden)
+
+        colores = {
+            'finalizado': '#2ecc71', 'En Proceso': '#3498db', 
+            'En dependencia': '#f1c40f', 'Riesgo': '#e74c3c'
+        }
+        
+        p = (
+            ggplot(plot_df, aes(x='Inicio', xend='Fin', y='Proyecto', yend='Proyecto', color='Status'))
+            + geom_segment(size=8, alpha=0.9)
+            
+            # Marcador de Fecha
+            + geom_vline(xintercept=today, linetype="dashed", color="#7f8c8d", size=1)
+            + annotate("text", x=today, y=max_y + 0.2, label=f"Hoy: {today_str}", 
+                       color="#7f8c8d", size=9, angle=0, ha="center", va="bottom")
+            + expand_limits(y=max_y + 0.5)
+            
+            + scale_color_manual(values=colores)
+            + labs(x="", y="", color="", title="")
+            + scale_x_datetime(date_labels="%d-%b")
+            + theme_minimal()
+            + theme(
+                panel_grid_major_y=element_blank(),
+                axis_text_y=element_text(size=9, color="#2c3e50", weight="bold"),
+                axis_text_x=element_text(size=8),
+                legend_position="top",
+                figure_size=(12, 3),
+                plot_margin=0
+            )
+        )
+        return p
+
+def _empty_message(msg):
+    return (ggplot() + annotate("text", x=0, y=0, label=msg, color="gray", size=10) + theme_void())
